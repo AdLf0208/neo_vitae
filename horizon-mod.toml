@@ -1,0 +1,32 @@
+id = "neovitae"
+name = "Neo Vitae"
+version = "0.2.0"
+description = """A port of Neo Vitae for Horizon: the Ara Vitae blood altar, the Capacity Rune family and the
+Novicius Orb of Vitae. The altar is a block entity with a 10,000 x capacity-modifier LP tank, a tier
+validated from the runes standing around it (weak: the altar alone; apprentice: the altar plus eight
+runes at y-1), a one-slot crafting loop that draws LP a tick (a diamond becomes a weak orb for 2,000
+LP), and click insert/take. The orb, right-clicked within five blocks of an altar, trades health for
+LP: creative fills the altar's room, survival pays 200 LP for two health. /neovitae altar|lp|insert
+are harness readouts (upstream has no commands). The mage and higher tiers, the other twenty rune
+types, the altar's fluid I/O and redstone, the crafting tree above the altar, Anima and the rituals
+are not ported yet."""
+authors = ["Saereth", "WayofTime", "AdLf0208"]
+# The original's licence: MIT (breakinblocks/NeoVitae, read from the 1.1.51 jar's
+# META-INF/neoforge.mods.toml); its text and copyright notice travel inside the package as
+# LICENSE / LICENSE-NOTICE.md.
+# A native mod: Rust in src/, compiled by the launcher against the game build [native] pins, beside
+# data/ and assets/. The id is the resource namespace and the only identity: Cargo's package name
+# and version are not the mod's.
+api = "0.2"
+# The installation side, not the hook's: the altar and its block entity run on the server, and single
+# player's integrated server belongs to the client installation, so "both".
+side = "both"
+# The one shared value every manifest carries ("May add blocks, items, mob effects and entity
+# types"): this package declares the altar and the three rune blocks, their items, loot, the recipe
+# tags, the creative tab and the altar's block entity type.
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

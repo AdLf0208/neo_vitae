@@ -1,0 +1,20 @@
+[package]
+# Port of Neo Vitae 1.1.51 (breakinblocks/NeoVitae, MIT, commit
+# 0abaa11f31add824a5d2be5018fbbe6a69b0a1bf). Minecraft Java 1.21.1 NeoForge; the
+# port targets Horizon 26.3 at the pin in horizon-mod.toml. Clean-room Rust rewrite
+# from the mod's behaviour (notes.md, FINDINGS.md); local-only until the maintainer
+# approves publishing, publishable under MIT with this source.
+#
+# Cargo's name and version are not the mod's identity: horizon-mod.toml is.
+name = "neovitae"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+description = "Neo Vitae for Horizon: the Ara Vitae altar, capacity runes and the weak orb"
+publish = false
+
+[dependencies]
+# The pinned SDK's API crate, fetched into .horizon/sdk/ by any `cargo horizon-mod` command (the
+# launcher builds against its own copy of the same build). Any other registry dependency must be
+# pinned with `horizon-launcher native-lock .` before building.
+horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api" }
