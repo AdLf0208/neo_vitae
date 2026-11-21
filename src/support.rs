@@ -26,9 +26,14 @@ use mod_api::{
 };
 
 use crate::runtime::{
-    self, ALTAR, Altar, AltarKey, BLOOD_ORB_WEAK, Craft, ORB_ALTAR_RANGE, ORB_SACRIFICE_HEALTH,
-    Pending, SLOT, STRUCTURE_CHECK_INTERVAL, capacity_mod, recipe_for, sacrifice_lp, tier,
+    self, ALTAR, Altar, AltarKey, BLOOD_ORB_WEAK, Craft, Inserts, ORB_ALTAR_RANGE,
+    ORB_SACRIFICE_HEALTH, Pending, SLOT, STRUCTURE_CHECK_INTERVAL, capacity_mod, recipe_for,
+    sacrifice_lp, tier,
 };
+
+/// The damage type the orb's self-sacrifice deals: the same `minecraft:magic` the retired
+/// console command named, now applied to the resolved entity through the typed hurt path.
+const ORB_SACRIFICE_DAMAGE: &str = "minecraft:magic";
 
 /// The altar's block entity type, in this mod's namespace (`neovitae:ara_vitae`).
 const ALTAR_TYPE: &str = "ara_vitae";
@@ -68,8 +73,8 @@ pub fn declare(r: &mut dyn Registrar) {
         .blocks(&[ALTAR_TYPE])
         .build();
     r.block_part(altar, AltarBlock);
-    r.block_entity_part(&kind, AltarBlock)
-        .expect("the altar's Part attaches to the type this mod just declared");
+    r.block_entity_part(&kind, AltarEntity)
+        .expect("the altar's block-entity Part attaches to the type this mod just declared");
     r.block_container(&altar, container());
     let orb = r.item_key(BLOOD_ORB_WEAK);
     r.item_part(orb, Orb);
@@ -132,8 +137,16 @@ impl BlockPart for AltarBlock {
     }
 }
 
+/// The altar's block-entity Part. It is a **separate type** from the block Part: the engine refuses
+/// one part type attached to a block id twice, and a block-entity part is registered against the
+/// block it belongs to.
+pub struct AltarEntity;
+
 #[mod_api::horizon_part]
-impl BlockEntityPart for AltarBlock {
+impl BlockPart for AltarEntity {}
+
+#[mod_api::horizon_part]
+impl BlockEntityPart for AltarEntity {
     /// The altar ticks on the server (`EntityBlock.getTicker`).
     fn block_entity_ticks(&self, _host: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
         event.ticks = true;
@@ -586,15 +599,23 @@ fn settle_sacrifice(host: &mut dyn ServerHost, key: &AltarKey, altar: &mut Altar
     let Some(player) = host.player(uuid) else {
         return;
     };
-    let Some(name) = player.name(&*host) else {
-        return;
-    };
     let before = health_of(&*host, player);
-    let ran = host.commands().run_command(&format!(
-        "damage {name} {ORB_SACRIFICE_HEALTH} minecraft:magic"
-    ));
+    // Address the resolved player entity, never a name interpolated into a command: a name from
+    // an offline-mode login may carry selector punctuation (`@e`, `@a`), which would let one
+    // player redirect the console-level damage to someone else. `LivingRef::hurt` is the typed
+    // path the engine's own hurt takes (damage type, armour, cooldown and hurt hooks kept).
+    let taken = player
+        .entity()
+        .hurt(
+            host,
+            ORB_SACRIFICE_DAMAGE,
+            ORB_SACRIFICE_HEALTH as f32,
+            None,
+            None,
+        )
+        .unwrap_or(false);
     let after = health_of(&*host, player);
-    let lost = match (before, after, ran) {
+    let lost = match (before, after, taken) {
         (Some(before), Some(after), true) => (before - after).max(0.0),
         _ => 0.0,
     };
@@ -834,24 +855,26 @@ fn add(pos: [i32; 3], offset: [i32; 3]) -> [i32; 3] {
 // ---------------------------------------------------------------------------
 
 /// When an item last went into an altar from a click (for the other-hand retry guard).
-fn recent_inserts() -> &'static Mutex<Vec<(AltarKey, Instant)>> {
-    static INSERTS: OnceLock<Mutex<Vec<(AltarKey, Instant)>>> = OnceLock::new();
-    INSERTS.get_or_init(|| Mutex::new(Vec::new()))
+fn recent_inserts() -> &'static Mutex<Inserts> {
+    static INSERTS: OnceLock<Mutex<Inserts>> = OnceLock::new();
+    INSERTS.get_or_init(|| Mutex::new(Inserts::default()))
 }
 
+/// Records an insert for the other-hand retry guard (bounded: one live record per altar).
 fn mark_insert(key: AltarKey) {
+    let now = Instant::now();
     let mut inserts = recent_inserts()
         .lock()
         .expect("the insert guard is only locked for one push or read");
-    inserts.push((key, Instant::now()));
+    inserts.note(key, now, RETRY_GUARD);
 }
 
 fn inserted_recently(key: &AltarKey) -> bool {
+    let now = Instant::now();
     let mut inserts = recent_inserts()
         .lock()
         .expect("the insert guard is only locked for one push or read");
-    inserts.retain(|(_, when)| when.elapsed() < RETRY_GUARD);
-    inserts.iter().any(|(other, _)| other == key)
+    inserts.recent(key, now, RETRY_GUARD)
 }
 
 // ---------------------------------------------------------------------------

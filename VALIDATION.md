@@ -93,3 +93,17 @@ python3 ports/tools/upstream_ready.py neovitae             # blocked only on the
 the port root, the `Skills:` line, the PASS e2e and the pin; its only remaining
 objection is `status is pending, not ported`, which is the orchestrator's ledger
 row to change.
+
+## 26.3 dialect sweep (2026-11-21) — 0.2.2
+
+| Check | Command | Result |
+|---|---|---|
+| static dialect | `python3 ports/tools/check_261_dialect.py neovitae.hmod` | exit 0; pre-fix package exit 1 (`../_shared/evidence/neovitae/dialect-check-red.log`) |
+| tests | `cargo test --offline` | exit 0 (`dialect-test.log`) |
+| package | `cargo horizon-mod build` twice after `rm -f Cargo.lock` | `cmp`-identical, built against 0a875da |
+| registry check | `cargo horizon-mod check neovitae.hmod` | **57,571 B**, SHA-256 `e0453f447ebc0db5e3111b7f237b03038ebfde43d26784875c01f1b042a26d57`, exit 0 |
+| fits the pin | `cargo horizon-mod fits neovitae.hmod --build 0a875da` | `0a875da  made for`, exit 0 |
+| the gate | `python3 ports/tools/verify-sdk-package.py neovitae` | 1/1 |
+| in game | `tools/e2e-dialect.sh` | `PASS` + `EXIT:0`; `SELFTEST=1` `FAIL` + `EXIT:1`; `check-e2e-logs.py neovitae --strict` exit 0 |
+
+Changed: 4 loot tables. Proof: rune_blank drops 1; no recipe carried (altar crafting is the port's own e2e); pre-fix red. Full record in [`notes.md`](notes.md) §"26.3 dialect sweep".

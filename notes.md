@@ -166,6 +166,31 @@ are in `VALIDATION.md`.
 - Behaviours extracted are in `FINDINGS.md`; the rewrite differs where the
   deviations above say.
 
+## Review fixes (2026-11-18)
+
+The reviewer's source review of PR #1232 (`var/review-all/1232-neovitae.md`) left two findings; both
+are fixed in **0.2.1** (`57622 B`, sha256 `3f0e610056b6fa12a56cb0f733d81108d0bb8507e97de37563423c15b9f1adb2`).
+
+- **`src/support.rs:593` — self-sacrifice interpolated the player's raw name into a console-level
+  `/damage` command, so selector punctuation in an offline-mode name could redirect the damage.**
+  The resolved player entity is damaged through the typed `EntityRef::hurt` path
+  (`minecraft:magic`, 2.0, no direct/causing entity), so no command text is built from a name. The
+  credit still measures the health actually lost around the call. The in-game leg's survival-orb
+  assertion (200 LP for 2 health) is the fail-capable check.
+- **`src/support.rs:846` — every successful insert appended a retry record and only the take path
+  pruned them, so insert-only play grew a process-wide vector forever.** The guard is now
+  `runtime::Inserts`, which prunes expired records and keeps at most the latest record per altar on
+  **insertion**. Test: `runtime::tests::the_insert_guard_keeps_one_live_record_per_altar` (1000
+  inserts on one altar leave one record; an expired record is dropped when the next insert lands).
+
+**In-game leg:** `ports/tools/launcher-game.sh run neovitae` → `PASS` + `E2E EXIT:0`, control
+`EXIT:1`, recorded in `ports/_shared/evidence/neovitae-e2e/`.
+
+The same run exposed a load-time defect the reviewer could not see: the altar's Part was attached as
+both the block and the block-entity Part, and the engine refuses one part type attached to a block
+twice (`AltarBlock is attached to neovitae:ara_vitae twice`). The block-entity half is now
+`AltarEntity`; the package loads and the leg is green.
+
 ## Verification (evidence in `ports/_shared/evidence/neovitae/`)
 
 - `cargo test`: **18 passed** (standalone lib); `cargo clippy --all-targets
@@ -457,3 +482,46 @@ compatibility fix recorded in deviation 7).
 > tree).
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## 26.3 dialect sweep (2026-11-21) — carried recipes and loot tables, proven in game (0.2.2)
+
+The shared checker `ports/tools/check_261_dialect.py` (generalised from `ports/modularrouters/tools/data_shape.py`
+and `ports/createaddition/tools/data_shape.py`) found the 1.21.1 forms still in the package that had shipped
+at **0.2.1**; `cargo horizon-mod check`, `fits` and every unit test had passed on them, and the content
+was dead in game (a recipe returns nothing; a block drops empty).
+
+| Family | Files | 1.21.1 form that shipped | 26.3 form |
+|---|---|---|---|
+| recipe ingredients | none carried (0 recipe files; this slice's crafting is the altar's code path, proven by `tools/e2e.sh`) | `{"item": "…"}` / `{"tag": "…"}` | `"minecraft:…"` / `"#c:…"` |
+| loot pools | 4 (`ara_vitae`, `rune_blank`, `rune_capacity`, `rune_capacity_augmented`): `"conditions"` array, `bonus_rolls`, `"rolls": 1.0` | `"conditions": [ … ]`, `bonus_rolls`, `"rolls": 1.0` | one `"condition": {"type": "minecraft:…"}`, no `bonus_rolls`, `"rolls": 1` |
+
+The recipe phase reports n/a and the port's own e2e (altar crafting) is the recipe evidence; the sweep changed only loot here.
+
+**Red, kept:** `ports/_shared/evidence/neovitae/dialect-check-red.log` — the checker exits 1 on the pre-fix
+package itself (`dialect-prefix-0.2.1.hmod`, 0.2.1, kept in the same folder), naming every file.
+A reconstructed fixture carrying all three loot shapes plus a `requires_tool` block with no mineable tag is
+red too (`../../morered/dialect-check-fixture-red.log`). The checker's `--selftest` fails when any shape is
+accepted.
+
+  `n/a: this port carries no crafting recipe` (its content registers no recipe file; the altar's crafting is proven by the port's own `tools/e2e.sh`)
+
+  `the vanilla control dropped one, neovitae:rune_blank dropped 1 neovitae:rune_blank, and the cell is air`
+
+The in-game leg is `tools/e2e-dialect.sh` (`ports/_shared/evidence/neovitae/e2e-dialect.log`): `PASS` + `EXIT:0`,
+and `SELFTEST=1` inverts the expectation and ends `FAIL` + `EXIT:1` (`e2e-dialect-selftest.log`).
+`check-e2e-logs.py neovitae --strict` exits 0.
+
+**Ladder** (all in `build-slot.sh` leases, `CARGO_INCREMENTAL=0`, `BUILD_LOCAL=1`):
+
+| Step | Command | Result |
+|---|---|---|
+| tests | `cargo test --offline` | **29 passed**, 0 failed (`dialect-test.log`) |
+| package | `rm -f Cargo.lock && cargo horizon-mod build` (twice) | built against **0a875da** (re-pinned from 0b14f8a), second build `cmp`-identical (`dialect-build-1.log`, `dialect-build-2.log`) |
+| registry check | `cargo horizon-mod check neovitae.hmod` | `neovitae 0.2.2 (native-mod, format native-1/0a875da…/e59da90…, for 26.3)`, **57,571 B**, sha256 `e0453f447ebc…` (`dialect-check.log`) |
+| fits the pin | `cargo horizon-mod fits neovitae.hmod --build 0a875da` | `0a875da  made for`, exit 0 (`dialect-fits-0a875da.log`) |
+| fits the previous build | `… --build 0b14f8a` | `does not fit`, exit 1 (`dialect-fits-0b14f8a.log`) |
+| the gate | `python3 ports/tools/verify-sdk-package.py neovitae` | **1/1** (`dialect-gate.log`) |
+
+Package 0.2.2: **57,571 B**, SHA-256 `e0453f447ebc0db5e3111b7f237b03038ebfde43d26784875c01f1b042a26d57`.
+
+Skills: superpowers/using-superpowers,systematic-debugging,test-driven-development,verification-before-completion; BeautifulRust/none (no Rust change)

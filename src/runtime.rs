@@ -405,7 +405,6 @@ impl AltarKey {
 }
 
 /// Work waiting for the next tick, at most one entry per altar.
-///
 /// A second click before the tick replaces the first: [`Pending::push`] hands
 /// the replaced entry back, so the caller can return whatever the replaced
 /// request had already reserved (an item taken from the player's hand, say)
@@ -413,6 +412,51 @@ impl AltarKey {
 #[derive(Debug)]
 pub struct Pending<R> {
     entries: Vec<(AltarKey, R)>,
+}
+
+/// The other-hand retry guard: when an item last went into each altar.
+///
+/// The guard is process-wide, so it must not grow with play: an insert replaces that altar's
+/// record and prunes the expired ones, leaving at most one live record per altar — the reviewer's
+/// "keep only the latest record per altar". Before this rule only the read path pruned, so
+/// insert-only play grew the vector without bound.
+#[derive(Debug, Default)]
+pub struct Inserts {
+    entries: Vec<(AltarKey, std::time::Instant)>,
+}
+
+impl Inserts {
+    /// Records an insert for `key` at `now`, dropping expired records first.
+    pub fn note(&mut self, key: AltarKey, now: std::time::Instant, guard: std::time::Duration) {
+        self.entries
+            .retain(|(_, when)| now.saturating_duration_since(*when) < guard);
+        if let Some(index) = self.entries.iter().position(|(other, _)| *other == key) {
+            self.entries.swap_remove(index);
+        }
+        self.entries.push((key, now));
+    }
+
+    /// Whether `key` was inserted within `guard` of `now`.
+    pub fn recent(
+        &mut self,
+        key: &AltarKey,
+        now: std::time::Instant,
+        guard: std::time::Duration,
+    ) -> bool {
+        self.entries
+            .retain(|(_, when)| now.saturating_duration_since(*when) < guard);
+        self.entries.iter().any(|(other, _)| other == key)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 impl<R> Default for Pending<R> {
@@ -707,7 +751,8 @@ mod tests {
 
 #[cfg(test)]
 mod pending_tests {
-    use super::{AltarKey, Pending};
+    use super::{AltarKey, Inserts, Pending};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn a_second_click_replaces_the_pending_one_and_hands_it_back() {
@@ -750,5 +795,39 @@ mod pending_tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending.take(&near), None);
         assert_eq!(pending.take(&far), Some(2));
+    }
+
+    #[test]
+    fn the_insert_guard_keeps_one_live_record_per_altar() {
+        let guard = Duration::from_millis(500);
+        let start = Instant::now();
+        let mut inserts = Inserts::default();
+        let altar = AltarKey::new("minecraft:overworld", [0, 70, 0]);
+        for step in 0..1000 {
+            inserts.note(altar.clone(), start + Duration::from_millis(step), guard);
+        }
+        assert_eq!(
+            inserts.len(),
+            1,
+            "insert-only play must not grow the guard: one door per altar"
+        );
+
+        // A second altar gets its own record; an expired one is dropped on the
+        // next insertion.
+        let other = AltarKey::new("minecraft:the_nether", [0, 70, 0]);
+        inserts.note(other.clone(), start, guard);
+        assert_eq!(inserts.len(), 2);
+        assert!(inserts.recent(&altar, start + Duration::from_millis(10), guard));
+        assert!(inserts.recent(&other, start + Duration::from_millis(10), guard));
+        assert!(
+            !inserts.recent(&other, start + Duration::from_millis(600), guard),
+            "a record older than the guard is no longer recent"
+        );
+        inserts.note(altar.clone(), start + Duration::from_millis(700), guard);
+        assert_eq!(
+            inserts.len(),
+            1,
+            "the expired record is pruned when the next insert arrives"
+        );
     }
 }
